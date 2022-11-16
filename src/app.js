@@ -18,7 +18,7 @@ const mongoClient = new MongoClient(process.env.MONGO_URI);
 let db;
 let WalletDatabase;
 let clientsDataBase;
-
+let BalanceDataBase;
 // joi validations 
 
 const registerSchema = joi.object({
@@ -32,10 +32,10 @@ const registerSchema = joi.object({
 
 mongoClient.connect(() => {
     db = mongoClient.db("WalletMockServer")
-    clientsDataBase = db.collection("WalletMockServerClient")
+    clientsDataBase = db.collection("WalletMockServer_Client")
+    BalanceDataBase = db.collection("WalletMockServer_Balance")
     console.log("connected with database")
 })
-
 
 app.post("/sign-up", async (req, res) => {
 
@@ -93,19 +93,69 @@ app.post("/sign-in", async (req, res) => {
 
     try {
         const logInUser = await clientsDataBase.findOne({ email });
-        if (user && bcrypt.compareSync(password, user.password)) {
-            res.sendStatus(200);
+        if (logInUser && bcrypt.compareSync(password, logInUser.password)) {
+
+            // creating token and inserting in session
+            const token = uuid()
+
+            await db.collection("sessions").insertOne({
+                userId: logInUser._id,
+                token
+            })
+
+            res.status(200).send(token);
         } else {
-            res.sendStatus(401);
+            res.status(401).send("User or password incorrect");
         }
     } catch (err) {
         console.log(err);
-        res.sendStatus(500);
+        res.sendStatus(530);
     }
 });
 
-    await clientsDataBase.findOne()
 
-})
+app.get("/wallet", async (req, res) => {
+
+    // Validating with token
+    const { authorization } = req.header;
+    const token = authorization?.replace('Bearer ', '');
+
+    if (!token) {
+        res.status(401).send("missing token")
+        return
+    };
+    
+    //creating session for learning purposes
+    const session = await db.collection("sessions").findOne({ token });
+
+    if (!session) {
+        res.sendStatus(401)
+        return;
+    }
+
+    // finally searching for user  balance
+    const correspondingBalance = await BalanceDataBase.findOne({
+        _id: session.userId
+    })
+
+
+
+    if (correspondingBalance) {
+        // returning to front-end the complete wallet
+        const userBalance = BalanceDataBase.find({ _id: correspondingBalance._id }).toArray()
+        
+        //optional
+        delete userBalance._id
+
+        res.send(userBalance)
+        return
+    }
+    
+    else {
+        res.status(401).send("Balance not found")
+            return;
+    }
+});
+
 
 app.listen(5000, () => console.log("running in port 5000"))
