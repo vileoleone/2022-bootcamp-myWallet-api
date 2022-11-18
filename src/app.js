@@ -1,6 +1,6 @@
 import express from "express";
 import cors from "cors";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 import dotenv from "dotenv";
 import joi from "joi"
 import { v4 as uuid } from "uuid"
@@ -28,6 +28,13 @@ const registerSchema = joi.object({
     password_confirmation: joi.any().valid(joi.ref('password')).required()
 })
 
+const BalanceObjectSchema = joi.object({
+    value: joi.number().precision(2).strict().required(),
+    type: joi.string().valid('deposit', 'withdrawal'),
+    description: joi.string().max(15).required(),
+})
+
+
 // connecting with mongoDb 
 
 mongoClient.connect(() => {
@@ -45,8 +52,9 @@ app.post("/sign-up", async (req, res) => {
 
     const { error } = registerSchema.validate(req.body, { abortEarly: false })
     if (error) {
+        console.log("schema error")
         const errors = error.details.map((detail) => detail.message);
-        console.log(error)
+        console.log(error.message)
         return res.status(422).send(errors);
     }
 
@@ -55,7 +63,7 @@ app.post("/sign-up", async (req, res) => {
     try {
 
         const client_exist = await clientsDataBase.findOne({ name: name })
-        const clientEmail_exist = await clientsDataBase.findOne({ email: ElementInternals })
+        const clientEmail_exist = await clientsDataBase.findOne({ email: email })
 
         if (client_exist) {
             res.status(401).send("the name already exists")
@@ -68,7 +76,7 @@ app.post("/sign-up", async (req, res) => {
         }
 
     } catch (error) {
-        console.log(error)
+        console.log(error.message)
     }
 
     // encrypting user's password
@@ -84,7 +92,7 @@ app.post("/sign-up", async (req, res) => {
         })
         res.status(201).send("User registered")
     } catch (error) {
-        console.log(error)
+        console.log(error.message)
     }
 })
 
@@ -93,11 +101,10 @@ app.post("/sign-in", async (req, res) => {
 
     try {
         const logInUser = await clientsDataBase.findOne({ email });
-        if (logInUser && bcrypt.compareSync(password, logInUser.password)) {
 
+        if (logInUser && bcrypt.compareSync(password, logInUser.password)) {
             // creating token and inserting in session
             const token = uuid()
-
             await db.collection("sessions").insertOne({
                 userId: logInUser._id,
                 token
@@ -107,53 +114,84 @@ app.post("/sign-in", async (req, res) => {
         } else {
             res.status(401).send("User or password incorrect");
         }
+
     } catch (err) {
-        console.log(err);
+        console.log(err.message);
         res.sendStatus(530);
     }
 });
 
+app.post("/wallet", async (req, res) => {
+    const { value, description, type } = req.body
+
+    //Validating com JOI
+    const { error } = BalanceObjectSchema.validate(req.body, { abortEarly: false })
+    if (error) {
+        console.log("BalanceObjectSchema error")
+        const errors = error.details.map((detail) => detail.message);
+        return res.status(422).send(errors);
+    }
+    //Getting token to search for correct balance object defined by id
+    const { authorization } = req.headers;
+    const token = authorization?.replace('Bearer ', '');
+    console.log(token)
+    if (!token) {
+        res.status(401).send("missing token")
+        return
+    };
+
+    const { userId } = await db.collection("sessions").findOne({ token })
+
+    try {
+
+        BalanceDataBase.insertOne({
+            userId,
+            value,
+            description,
+            type
+        })
+
+        res.status(201).send("Transação Adicionada")
+    } catch (error) {
+        console.log(error)
+        res.status(401).send("Id do usuario não encontrado")
+    }
+})
 
 app.get("/wallet", async (req, res) => {
 
     // Validating with token
-    const { authorization } = req.header;
+    const { authorization } = req.headers;
     const token = authorization?.replace('Bearer ', '');
 
     if (!token) {
         res.status(401).send("missing token")
         return
     };
-    
+
     //creating session for learning purposes
+
     const session = await db.collection("sessions").findOne({ token });
 
     if (!session) {
         res.sendStatus(401)
         return;
     }
-
+   
     // finally searching for user  balance
-    const correspondingBalance = await BalanceDataBase.findOne({
-        _id: session.userId
-    })
-
-
+    const correspondingBalance = await BalanceDataBase.find({
+        userId: session.userId
+    }).toArray()
 
     if (correspondingBalance) {
         // returning to front-end the complete wallet
-        const userBalance = BalanceDataBase.find({ _id: correspondingBalance._id }).toArray()
-        
-        //optional
-        delete userBalance._id
-
-        res.send(userBalance)
+        res.send(correspondingBalance)
         return
     }
-    
+
     else {
         res.status(401).send("Balance not found")
-            return;
+        return;
     }
 });
 
