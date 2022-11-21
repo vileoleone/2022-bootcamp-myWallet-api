@@ -140,6 +140,7 @@ app.post("/addEntry", async (req, res) => {
         description, 
         type: "deposit"
     }
+    
     //Validating com JOI
     const { error } = BalanceObjectSchema.validate(body, { abortEarly: false })
     if (error) {
