@@ -102,7 +102,7 @@ app.post("/sign-in", async (req, res) => {
 
     try {
         const logInUser = await clientsDataBase.findOne({ email });
-        
+        console.log(logInUser)
         if (logInUser && bcrypt.compareSync(password, logInUser.password)) {
             // creating token and inserting in session
             let token;
@@ -118,9 +118,10 @@ app.post("/sign-in", async (req, res) => {
                 })
             }
 
-            
+            const responseArray = [{token,name:logInUser.name}]
+
             console.log(token)
-            res.status(200).send(token);
+            res.status(200).send(responseArray);
         } else {
             res.status(401).send("User or password incorrect");
         }
