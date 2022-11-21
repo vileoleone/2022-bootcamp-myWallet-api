@@ -5,6 +5,7 @@ import dotenv from "dotenv";
 import joi from "joi"
 import { v4 as uuid } from "uuid"
 import bcrypt from 'bcryptjs';
+import dayjs from "dayjs";
 //setup for extenal dependencies used in this projectconfiguring dotenv
 dotenv.config();
 //initial configuration for mongoDb server
@@ -30,8 +31,8 @@ const registerSchema = joi.object({
 
 const BalanceObjectSchema = joi.object({
     value: joi.number().precision(2).strict().required(),
-    type: joi.string().valid('deposit', 'withdrawal'),
     description: joi.string().max(15).required(),
+    type: joi.string().valid("deposit", "withdrawal").required()
 })
 
 
@@ -101,15 +102,24 @@ app.post("/sign-in", async (req, res) => {
 
     try {
         const logInUser = await clientsDataBase.findOne({ email });
-
+        
         if (logInUser && bcrypt.compareSync(password, logInUser.password)) {
             // creating token and inserting in session
-            const token = uuid()
-            await db.collection("sessions").insertOne({
-                userId: logInUser._id,
-                token
-            })
+            let token;
+            const logInUserToken = await db.collection("sessions").findOne({ userId: logInUser._id})
+            if (logInUserToken) {
+                token = logInUserToken.token
+                console.log(token)
+            } else {
+                token = uuid()
+                await db.collection("sessions").insertOne({
+                    userId: logInUser._id,
+                    token
+                })
+            }
 
+            
+            console.log(token)
             res.status(200).send(token);
         } else {
             res.status(401).send("User or password incorrect");
@@ -121,11 +131,16 @@ app.post("/sign-in", async (req, res) => {
     }
 });
 
-app.post("/wallet", async (req, res) => {
-    const { value, description, type } = req.body
-
+app.post("/addEntry", async (req, res) => {
+    let { value, description } = req.body
+    const now = dayjs()
+    const body = {
+        value: +parseFloat(value).toFixed(2),
+        description, 
+        type: "deposit"
+    }
     //Validating com JOI
-    const { error } = BalanceObjectSchema.validate(req.body, { abortEarly: false })
+    const { error } = BalanceObjectSchema.validate(body, { abortEarly: false })
     if (error) {
         console.log("BalanceObjectSchema error")
         const errors = error.details.map((detail) => detail.message);
@@ -134,7 +149,7 @@ app.post("/wallet", async (req, res) => {
     //Getting token to search for correct balance object defined by id
     const { authorization } = req.headers;
     const token = authorization?.replace('Bearer ', '');
-    console.log(token)
+    console.log(req.headers)
     if (!token) {
         res.status(401).send("missing token")
         return
@@ -146,9 +161,53 @@ app.post("/wallet", async (req, res) => {
 
         BalanceDataBase.insertOne({
             userId,
-            value,
+            value: `${+parseFloat(value).toFixed(2) }`,
             description,
-            type
+            type: "deposit",
+            date: now.format('DD/MM')
+            
+        })
+
+        res.status(201).send("Transação Adicionada")
+    } catch (error) {
+        console.log(error)
+        res.status(401).send("Id do usuario não encontrado")
+    }
+})
+app.post("/SubtractEntry", async (req, res) => {
+    let { value, description } = req.body
+    const body = {
+        value: +parseFloat(value).toFixed(2),
+        description,
+        type: "withdrawal"
+    }
+    //Validating com JOI
+    const { error } = BalanceObjectSchema.validate(body, { abortEarly: false })
+    if (error) {
+        console.log("BalanceObjectSchema error")
+        const errors = error.details.map((detail) => detail.message);
+        return res.status(422).send(errors);
+    }
+    //Getting token to search for correct balance object defined by id
+    const { authorization } = req.headers;
+    const token = authorization?.replace('Bearer ', '');
+    console.log(req.headers)
+    if (!token) {
+        res.status(401).send("missing token")
+        return
+    };
+
+    const { userId } = await db.collection("sessions").findOne({ token })
+
+    try {
+        const now = dayjs()
+        BalanceDataBase.insertOne({
+            userId,
+            value: `${+parseFloat(value).toFixed(2)}`,
+            description,
+            type: "withdrawal",
+            date: now.format('DD/MM')
+
         })
 
         res.status(201).send("Transação Adicionada")
@@ -158,7 +217,7 @@ app.post("/wallet", async (req, res) => {
     }
 })
 
-app.get("/wallet", async (req, res) => {
+app.get("/MainPage", async (req, res) => {
 
     // Validating with token
     const { authorization } = req.headers;
